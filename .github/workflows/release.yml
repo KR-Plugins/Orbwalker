@@ -1,0 +1,81 @@
+name: Build & Release
+on:
+  push:
+    tags:
+      - '*'
+env:
+  SOLUTION_NAME: Orbwalker
+  INTERNAL_NAME: Orbwalker
+  RELEASE_DIR: Orbwalker\bin\Release\Orbwalker
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    - name: Download Dalamud
+      run: |
+        Invoke-WebRequest `
+          -URI https://github.com/dohwacorp/Dalamud/releases/latest/download/dalamud.zip `
+          -OutFile Dalamud.zip
+        Expand-Archive -Path Dalamud.zip -DestinationPath $env:GITHUB_WORKSPACE\Dalamud
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v1.1
+    - uses: actions/cache@v3
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+    - name: Build
+      run: |
+        msbuild /t:restore `
+                /p:RestorePackagesConfig=true
+        msbuild /p:DalamudLibPath=$env:GITHUB_WORKSPACE\Dalamud\ `
+                /p:Configuration=Release
+    - uses: actions/upload-artifact@v2
+      with:
+        name: PluginRepoZip
+        path: ${{ env.RELEASE_DIR }}
+        if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        body: ""
+        prerelease: true
+    - uses: actions/download-artifact@v2
+      with:
+        name: PluginRepoZip
+        path: ${{ env.INTERNAL_NAME }}
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ${{ env.INTERNAL_NAME }}/latest.zip
+        asset_name: ${{ env.INTERNAL_NAME }}.zip
+        asset_content_type: application/zip
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ${{ env.INTERNAL_NAME }}/${{ env.INTERNAL_NAME }}.json
+        asset_name: ${{ env.INTERNAL_NAME }}.json
+        asset_content_type: text/plain
